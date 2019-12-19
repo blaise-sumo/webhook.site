@@ -13,6 +13,7 @@
     </script>
 
     <link href="css/app.css" rel="stylesheet">
+    <script src="js/socket.io.js"></script>
     <script src="js/libs.js"></script>
     <script src="js/bundle.js"></script>
     <script async defer src="https://buttons.github.io/buttons.js"></script>
@@ -92,7 +93,7 @@
                             <a ng-click="setCurrentRequest(request)" class="select">
                                 <span class="label label-{{ getLabel(request.method) }}">{{ request.method }}</span>
                                 #{{ request.uuid.substring(0,5) }} {{ request.ip }} <br/>
-                                <small>{{ request.created_at }}</small>
+                                <small>{{ localDate(request.created_at) }}</small>
                             </a>
                             <a ng-click="deleteRequest(request, key)" class="btn btn-danger delete">
                                 X
@@ -193,6 +194,15 @@
                                        ga-on="click" ga-event-category="AutoRedirect" ga-event-action="redir-now">Redirect
                                         Now</a>&emsp;&emsp;
 
+                                    <!-- CORS -->
+                                    <label class="small" title="Enable automatic CORS headers">
+                                        <input type="checkbox" ng-model="token.cors"
+                                               ga-on="click" ga-event-category="CustomActions" ga-event-action="toggleEnable"
+                                               ng-change="toggleCors(token)"
+                                        />
+                                        Enable CORS <sup class="muted">BETA</sup> &emsp;
+                                    </label>
+
                                     <!-- Auto-JSON -->
                                     <label class="small"
                                            title="Automatically applies easy to read JSON and XML formatting on valid requests">
@@ -218,12 +228,25 @@
                                         <th colspan="2">
                                             Request Details
                                             <span class="pull-right">
-                                                <a class="small"
+                                                <a class="btn btn-link btn-xxs"
                                                    href="{{ protocol }}//{{ domain }}/#/{{ token.uuid }}/{{ currentRequestIndex }}/{{ currentPage }}">
-                                                    permalink</a> &ensp;
-                                                <a class="small" target="_blank"
+                                                    Permalink</a>
+                                                <a class="btn btn-link btn-xxs" target="_blank"
                                                    href="{{ protocol }}//{{ domain }}/token/{{ token.uuid }}/request/{{ currentRequest.uuid }}/raw">
-                                                raw</a>
+                                                    Raw content</a>
+                                                <div class="btn-group btn-group-xxs form-inline dropdown">
+                                                    <button type="button" class="btn btn-link"
+                                                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false"
+                                                            ng-click="getBaseVariables(currentRequest)">
+                                                        Copy As <span class="caret"></span>
+                                                    </button>
+                                                    <ul class="dropdown-menu scrollable-menu">
+                                                        <li ng-repeat="type in convertTypes">
+                                                            <a ng-click="copyRequestAs(currentRequest, type)">
+                                                                {{ type }}</a>
+                                                        </li>
+                                                    </ul>
+                                                </div>
                                             </span>
                                         </th>
                                     </tr>
@@ -246,7 +269,7 @@
                                     </tr>
                                     <tr>
                                         <td>Date</td>
-                                        <td id="req-date">{{ currentRequest.created_at }}</td>
+                                        <td id="req-date" title="{{ currentRequest.created_at }} UTC">{{ localDate(currentRequest.created_at) }} ({{ relativeDate(currentRequest.created_at) }})</td>
                                     </tr>
                                     <tr>
                                         <td>ID</td>

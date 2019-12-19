@@ -1,4 +1,5 @@
-var prettyData = require('pretty-data').pd;
+let prettyData = require('pretty-data').pd;
+let moment = require('moment');
 
 angular
     .module("app", [
@@ -135,6 +136,10 @@ angular
             $scope.saveSettings();
         });
 
+        /**
+         * Tutorial
+         */
+
         $scope.toggleTutorial = (function () {
             if ($scope.hideTutorial === true) {
                 $scope.hideTutorial = false;
@@ -143,7 +148,7 @@ angular
             }
         });
 
-        /*
+        /**
          * Unread Count
          */
 
@@ -183,8 +188,31 @@ angular
         $scope.updateUnreadCount();
 
         /**
+         * Push
+         */
+
+        $scope.pushSubscribe = (function (token) {
+            Echo.leave(token); // Make sure we're not subscribed twice.
+
+            Echo.channel(token)
+                .listen('.request.created', function (data) {
+                    if (data.truncated) {
+                        $scope.getRequest(data.request.token_id, data.request.uuid).then(function (response) {
+                            $scope.appendRequest(response);
+                        });
+                    } else {
+                        $scope.appendRequest(data.request);
+                    }
+                    $scope.requests.total = data.total;
+                    $scope.$apply();
+                });
+        });
+
+        /**
          * Controller actions
          */
+
+        // Requests
 
         $scope.setCurrentRequest = (function (request) {
             $scope.currentRequestIndex = request.uuid;
@@ -279,19 +307,92 @@ angular
             $.notify('Request received');
         });
 
-        $scope.pushSubscribe = (function (token) {
-            Echo.channel(token)
-                .listen('.request.created', function (data) {
-                    if (data.truncated) {
-                        $scope.getRequest(data.request.token_id, data.request.uuid).then(function (response) {
-                            $scope.appendRequest(response);
-                        });
-                    } else {
-                        $scope.appendRequest(data.request);
+        $scope.convertTypes = ['curl', 'HAR'];
+
+        $scope.convertRequest = (function (request, as) {
+            switch (as) {
+                case 'curl':
+                    let curl = `curl -X '${request.method}' '${request.url}'`;
+
+                    // Headers
+                    for (let header in request.headers) {
+                        if (!request.headers.hasOwnProperty(header)) {
+                            continue;
+                        }
+                        curl += ` -H '${header}: ${request.headers[header]}'`;
                     }
-                    $scope.requests.total = data.total;
-                });
+
+                    // Body
+                    if (request.content !== null && request.content !== '') {
+                        curl += ` -d $'${request.content}'`;
+                    }
+
+                    return curl;
+
+                case 'HAR':
+                    const headers2har = function(headers) {
+                        let convHeaders = [];
+                        for (let header in headers) {
+                            if (!headers.hasOwnProperty(header)) {
+                                continue;
+                            }
+                            convHeaders.push({
+                                'name': header,
+                                'value': headers[header][0]
+                            });
+                        }
+                        return convHeaders;
+                    };
+                    return JSON.stringify({
+                        'log': {
+                            'version': '1.2',
+                            'creator': {
+                                'name': 'Webhook.site',
+                                'version': '1.0',
+                            },
+                            'entries': [{
+                                // TODO: Add requests/responses from custom actions?
+                                'startedDateTime': request.created_at,
+                                'request': {
+                                    'method': request.method,
+                                    'url': request.url,
+                                    'headers': headers2har(request.headers),
+                                    'bodySize': !request.content ? 0 : request.content.length,
+                                    'postData': {
+                                        'mimeType': !request.headers['content-type']
+                                            ? request.headers['content-type'][0]
+                                            : 'application/json',
+                                        'text': !request.content ? '' : request.content,
+                                    }
+                                },
+                                'response': {
+                                    'status': $scope.token.default_status,
+                                    'httpVersion': 'HTTP/1.1',
+                                    'headers': [
+                                        {'name': 'Content-Type', 'value': $scope.token.default_content_type}
+                                    ],
+                                    'content': {
+                                        'size': $scope.token.default_content.length,
+                                        'text': $scope.token.default_content,
+                                        'mimeType': $scope.token.default_content_type,
+                                    }
+                                }
+                            }]
+                        }
+                    });
+
+                default:
+                    return 'Invalid format';
+            }
         });
+
+        $scope.copyRequestAs = (function (request, as) {
+            const conv = $scope.convertRequest(request, as);
+            copyToClipboard(conv);
+            $.notify('Copied request as ' + as);
+        });
+
+        // Tokens
 
         $scope.getToken = (function (tokenId, offset, page) {
             if (!tokenId) {
@@ -369,6 +470,25 @@ angular
                     $.notify('URL updated!');
                 });
         });
+
+        $scope.toggleCors = (function (token) {
+            $http.put('token/' + token.uuid + '/cors/toggle')
+                .then(function (response) {
+                    if (response.status === 200) {
+                        $scope.token.actions = response.data.enabled;
+                        $scope.token.actions
+                            ? $.notify('CORS enabled.')
+                            : $.notify('CORS disabled.');
+
+                    } else {
+                        $.notify('Could not toggle CORS: ' + response.data.error.message);
+                    }
+                }).catch(function (response) {
+                    $.notify('Could not toggle CORS: ' + response.data.error.message);
+                });
+        });
+
+        // Pagination
 
         $scope.getPreviousPage = (function (token) {
             $http({
@@ -494,9 +614,9 @@ angular
             }
 
             try {
-                var json = JSON.parse(content);
+                var json = JSONbig.parse(content);
                 if (typeof json != 'string') {
-                    json = JSON.stringify(json, undefined, 2);
+                    json = JSONbig.stringify(json, undefined, 2);
                 }
             } catch (e) {
                 return content;
@@ -505,6 +625,10 @@ angular
         };
 
         $scope.formatContent = function (content) {
+            if (!content) {
+                return '';
+            }
+            
             let hloutput = hljs.highlightAuto(content);
 
             if (hloutput.language === "json") {
@@ -516,6 +640,14 @@ angular
 
             return content;
         };
+
+        $scope.localDate = (function (dateTimeString) {
+            return moment.utc(dateTimeString).local().format('lll');
+        });
+
+        $scope.relativeDate = (function (dateTimeString) {
+            return moment.utc(dateTimeString).fromNow();
+        });
 
         // Initialize app. Check whether we need to load a token.
         if ($state.current.name) {
